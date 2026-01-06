@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import { AUDIO_CONFIG, AudioPlaybackState } from "@/types";
+import { AudioPlaybackState } from "@/types";
+
+// Gemini returns audio at 24kHz
+const PLAYBACK_SAMPLE_RATE = 24000;
 
 interface UseAudioPlaybackReturn {
   state: AudioPlaybackState;
@@ -21,7 +24,7 @@ export function useAudioPlayback(): UseAudioPlaybackReturn {
   const getAudioContext = useCallback(() => {
     if (!audioContextRef.current || audioContextRef.current.state === "closed") {
       audioContextRef.current = new AudioContext({
-        sampleRate: AUDIO_CONFIG.sampleRate,
+        sampleRate: PLAYBACK_SAMPLE_RATE,
       });
     }
     return audioContextRef.current;
@@ -55,9 +58,9 @@ export function useAudioPlayback(): UseAudioPlaybackReturn {
 
     // Create audio buffer
     const audioBuffer = audioContext.createBuffer(
-      AUDIO_CONFIG.channelCount,
+      1, // mono
       float32Array.length,
-      AUDIO_CONFIG.sampleRate
+      PLAYBACK_SAMPLE_RATE
     );
     audioBuffer.getChannelData(0).set(float32Array);
 
