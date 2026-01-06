@@ -3,19 +3,23 @@
 import { useState, useCallback } from "react";
 import { VoiceButton, StatusText } from "@/components";
 import { useAudioCapture } from "@/hooks";
+import { sendAudioToBackend } from "@/lib/api";
 
 export default function Home() {
   const [isActive, setIsActive] = useState(false);
-  const { state, error, startCapture, stopCapture } = useAudioCapture();
+  const { error, startCapture, stopCapture } = useAudioCapture();
 
   const handleToggle = useCallback(() => {
     if (isActive) {
       stopCapture();
       setIsActive(false);
     } else {
-      startCapture((audioData) => {
-        // For now, just receive audio data - will send to backend in Phase 3
-        // Logging is already in the hook
+      startCapture(async (audioData) => {
+        try {
+          await sendAudioToBackend(audioData);
+        } catch (err) {
+          console.error("Failed to send audio:", err);
+        }
       });
       setIsActive(true);
     }
