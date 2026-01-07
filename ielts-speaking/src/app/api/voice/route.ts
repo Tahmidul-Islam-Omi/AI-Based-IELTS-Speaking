@@ -75,7 +75,7 @@ async function sendToGemini(base64Audio: string): Promise<string | null> {
 
     try {
       const session = await ai.live.connect({
-        model: "gemini-2.0-flash-exp",
+        model: "gemini-2.5-flash-native-audio-preview-12-2025",
         config: {
           responseModalities: [Modality.AUDIO],
         },
