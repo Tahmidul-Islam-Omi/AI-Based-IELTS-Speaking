@@ -1,3 +1,4 @@
+// Audio Worklet Processor for capturing microphone audio
 class AudioProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
@@ -6,7 +7,7 @@ class AudioProcessor extends AudioWorkletProcessor {
     this.bufferIndex = 0;
   }
 
-  process(inputs) {
+  process(inputs, outputs, parameters) {
     const input = inputs[0];
     if (!input || !input[0]) return true;
 
@@ -16,9 +17,7 @@ class AudioProcessor extends AudioWorkletProcessor {
       this.buffer[this.bufferIndex++] = inputChannel[i];
 
       if (this.bufferIndex >= this.bufferSize) {
-        // Convert Float32 to Int16 PCM
         const pcmData = this.float32ToInt16(this.buffer);
-        console.log(`[AudioWorklet] Processing buffer: ${this.bufferSize} samples → ${pcmData.byteLength} bytes`);
         this.port.postMessage({ audioData: pcmData.buffer });
         this.bufferIndex = 0;
       }

@@ -3,14 +3,14 @@
 import { useRef, useCallback, useState } from "react";
 import { arrayBufferToBase64, base64ToArrayBuffer } from "@/lib/api";
 
-type Status = "idle" | "connecting" | "recording" | "processing" | "speaking" | "error";
+type Status = "idle" | "connecting" | "listening" | "silence_detected" | "processing" | "speaking" | "error";
 
 interface UseWebSocketReturn {
   status: Status;
   connect: () => void;
   disconnect: () => void;
-  startRecording: () => void;
-  stopRecording: () => void;
+  startListening: () => void;
+  stopListening: () => void;
   sendAudioChunk: (audioData: ArrayBuffer) => void;
   onAudioChunk: (callback: (audioData: ArrayBuffer) => void) => void;
 }
@@ -19,6 +19,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const [status, setStatus] = useState<Status>("idle");
   const wsRef = useRef<WebSocket | null>(null);
   const audioCallbackRef = useRef<((audioData: ArrayBuffer) => void) | null>(null);
+  const isListeningRef = useRef(false);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -36,7 +37,7 @@ export function useWebSocket(): UseWebSocketReturn {
 
       if (data.type === "status") {
         console.log(`📊 Status: ${data.status}`);
-        if (data.status === "recording") setStatus("recording");
+        if (data.status === "recording") setStatus("listening");
         if (data.status === "processing") setStatus("processing");
         if (data.status === "done") setStatus("idle");
       }
@@ -64,6 +65,7 @@ export function useWebSocket(): UseWebSocketReturn {
     ws.onclose = () => {
       console.log("🔌 WebSocket disconnected");
       setStatus("idle");
+      isListeningRef.current = false;
     };
 
     wsRef.current = ws;
@@ -74,23 +76,30 @@ export function useWebSocket(): UseWebSocketReturn {
       wsRef.current.close();
       wsRef.current = null;
     }
+    isListeningRef.current = false;
     setStatus("idle");
   }, []);
 
-  const startRecording = useCallback(() => {
+  const startListening = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      console.log("🎙️ Starting to listen for audio");
+      isListeningRef.current = true;
       wsRef.current.send(JSON.stringify({ type: "start" }));
+      setStatus("listening");
     }
   }, []);
 
-  const stopRecording = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+  const stopListening = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN && isListeningRef.current) {
+      console.log("⏹️ Stopping listening - sending audio to Gemini");
+      isListeningRef.current = false;
+      setStatus("silence_detected");
       wsRef.current.send(JSON.stringify({ type: "stop" }));
     }
   }, []);
 
   const sendAudioChunk = useCallback((audioData: ArrayBuffer) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    if (wsRef.current?.readyState === WebSocket.OPEN && isListeningRef.current) {
       const base64Audio = arrayBufferToBase64(audioData);
       wsRef.current.send(JSON.stringify({ type: "audio", audio: base64Audio }));
     }
@@ -104,8 +113,8 @@ export function useWebSocket(): UseWebSocketReturn {
     status,
     connect,
     disconnect,
-    startRecording,
-    stopRecording,
+    startListening,
+    stopListening,
     sendAudioChunk,
     onAudioChunk,
   };
