@@ -25,32 +25,32 @@ app.prepare().then(() => {
   wss.on("connection", (ws) => {
     console.log("🔗 Client connected");
     
-    let audioChunks = [];
     let geminiSession = null;
+    let isRecording = false;
+    let geminiConnected = false;
+    let isProcessing = false; // Track if Gemini is still processing
+
+    // Safe send - only send if WebSocket is open
+    const safeSend = (data) => {
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify(data));
+        return true;
+      }
+      console.log("⚠️ WebSocket not open, skipping send");
+      return false;
+    };
 
     ws.on("message", async (message) => {
       try {
         const data = JSON.parse(message.toString());
 
         if (data.type === "start") {
-          audioChunks = [];
-          console.log("🎙️ Recording started");
-          ws.send(JSON.stringify({ type: "status", status: "recording" }));
-        }
+          console.log("🎙️ Recording started - connecting to Gemini...");
+          isRecording = true;
+          isProcessing = false;
+          safeSend({ type: "status", status: "recording" });
 
-        if (data.type === "audio") {
-          const audioBuffer = Buffer.from(data.audio, "base64");
-          audioChunks.push(audioBuffer);
-        }
-
-        if (data.type === "stop") {
-          console.log(`📤 Sending ${audioChunks.length} chunks to Gemini...`);
-          ws.send(JSON.stringify({ type: "status", status: "processing" }));
-
-          const combinedAudio = Buffer.concat(audioChunks);
-          const base64Audio = combinedAudio.toString("base64");
-
-          // Connect to Gemini and stream responses
+          // Connect to Gemini immediately (don't wait for audio)
           try {
             geminiSession = await ai.live.connect({
               model: "gemini-2.0-flash-exp",
@@ -59,62 +59,87 @@ app.prepare().then(() => {
               },
               callbacks: {
                 onopen: () => {
-                  console.log("🔗 Connected to Gemini");
+                  console.log("� Connectted to Gemini - ready to stream audio");
+                  geminiConnected = true;
                 },
                 onmessage: (msg) => {
                   if (msg.serverContent?.modelTurn?.parts) {
                     for (const part of msg.serverContent.modelTurn.parts) {
                       if (part.inlineData?.data) {
-                        // Stream chunk immediately to frontend
-                        ws.send(JSON.stringify({
-                          type: "audio_chunk",
-                          audio: part.inlineData.data,
-                        }));
-                        console.log("🔊 Streamed audio chunk to frontend");
+                        // Stream response chunk immediately to frontend
+                        if (safeSend({ type: "audio_chunk", audio: part.inlineData.data })) {
+                          console.log("🔊 Streamed response chunk to frontend");
+                        }
                       }
                     }
                   }
 
                   if (msg.serverContent?.turnComplete) {
                     console.log("✅ Gemini turn complete");
-                    ws.send(JSON.stringify({ type: "status", status: "done" }));
+                    isProcessing = false;
+                    safeSend({ type: "status", status: "done" });
+                    
+                    // Close Gemini session
                     if (geminiSession) {
                       geminiSession.close();
                       geminiSession = null;
+                      geminiConnected = false;
                     }
                   }
                 },
                 onerror: (e) => {
                   console.error("❌ Gemini error:", e);
-                  ws.send(JSON.stringify({ type: "error", message: "Gemini error" }));
+                  isProcessing = false;
+                  safeSend({ type: "error", message: "Gemini error" });
+                  geminiConnected = false;
                 },
                 onclose: () => {
                   console.log("🔌 Gemini connection closed");
+                  geminiConnected = false;
+                  isProcessing = false;
                 },
               },
             });
-
-            // Send audio to Gemini
-            geminiSession.sendRealtimeInput({
-              audio: {
-                data: base64Audio,
-                mimeType: "audio/pcm;rate=16000",
-              },
-            });
-
-            // Signal end of audio
-            setTimeout(() => {
-              if (geminiSession) {
-                geminiSession.sendRealtimeInput({ audioStreamEnd: true });
-              }
-            }, 500);
-
           } catch (err) {
             console.error("❌ Failed to connect to Gemini:", err);
-            ws.send(JSON.stringify({ type: "error", message: "Failed to connect to Gemini" }));
+            safeSend({ type: "error", message: "Failed to connect to Gemini" });
+            isRecording = false;
+            isProcessing = false;
           }
+        }
 
-          audioChunks = [];
+        if (data.type === "audio") {
+          // Stream audio chunk to Gemini immediately (don't wait for all chunks)
+          if (geminiConnected && geminiSession && isRecording) {
+            try {
+              geminiSession.sendRealtimeInput({
+                audio: {
+                  data: data.audio,
+                  mimeType: "audio/pcm;rate=16000",
+                },
+              });
+            } catch (err) {
+              console.error("❌ Error sending audio to Gemini:", err);
+            }
+          }
+        }
+
+        if (data.type === "stop") {
+          console.log("⏹️ Recording stopped - signaling end of audio to Gemini");
+          isRecording = false;
+          isProcessing = true; // Gemini is now processing
+          safeSend({ type: "status", status: "processing" });
+
+          // Signal end of audio stream to Gemini
+          if (geminiConnected && geminiSession) {
+            try {
+              geminiSession.sendRealtimeInput({ audioStreamEnd: true });
+              console.log("📤 Signaled end of audio stream to Gemini");
+            } catch (err) {
+              console.error("❌ Error signaling end of audio:", err);
+              isProcessing = false;
+            }
+          }
         }
       } catch (err) {
         console.error("❌ Error processing message:", err);
@@ -123,10 +148,24 @@ app.prepare().then(() => {
 
     ws.on("close", () => {
       console.log("🔌 Client disconnected");
-      if (geminiSession) {
-        geminiSession.close();
+      
+      // Only close Gemini if not processing
+      // If processing, let it finish (response will be lost but prevents errors)
+      if (!isProcessing && geminiSession) {
+        try {
+          geminiSession.close();
+        } catch {}
         geminiSession = null;
+        geminiConnected = false;
+      } else if (isProcessing) {
+        console.log("⚠️ Client disconnected while Gemini was processing - response will be lost");
       }
+      
+      isRecording = false;
+    });
+
+    ws.on("error", (err) => {
+      console.error("❌ WebSocket error:", err);
     });
   });
 
