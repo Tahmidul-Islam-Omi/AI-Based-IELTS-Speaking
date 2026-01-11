@@ -56,6 +56,13 @@ app.prepare().then(() => {
               model: "gemini-2.0-flash-exp",
               config: {
                 responseModalities: [Modality.AUDIO],
+                speechConfig: {
+                  voiceConfig: {
+                    prebuiltVoiceConfig: {
+                      voiceName: "Kore", // Consistent voice: Puck, Charon, Kore, Fenrir, Aoede
+                    },
+                  },
+                },
               },
               callbacks: {
                 onopen: () => {

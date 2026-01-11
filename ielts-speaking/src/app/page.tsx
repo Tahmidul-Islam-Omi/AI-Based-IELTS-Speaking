@@ -8,7 +8,7 @@ export default function Home() {
   const [isConversationActive, setIsConversationActive] = useState(false);
   const { error, startCapture, stopCapture } = useAudioCapture();
   const { playAudio } = useAudioPlayback();
-  const { status, connect, startListening, stopListening, sendAudioChunk, onAudioChunk } = useWebSocket();
+  const { status, connect, disconnect, startListening, stopListening, sendAudioChunk, onAudioChunk } = useWebSocket();
   
   const isConversationActiveRef = useRef(false);
 
@@ -26,7 +26,14 @@ export default function Home() {
   // Connect WebSocket on mount
   useEffect(() => {
     connect();
-  }, [connect]);
+    
+    // Cleanup on unmount (when user closes tab/navigates away)
+    return () => {
+      if (!isConversationActiveRef.current) {
+        disconnect();
+      }
+    };
+  }, [connect, disconnect]);
 
   // Handle incoming audio chunks and restart listening after AI finishes
   useEffect(() => {
@@ -74,6 +81,7 @@ export default function Home() {
     isConversationActiveRef.current = false;
     stopCapture();
     stopListening();
+    // Don't disconnect - keep WebSocket alive for next conversation
   }, [stopCapture, stopListening]);
 
   const handleToggle = useCallback(() => {
